@@ -1,66 +1,115 @@
-import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
-
-// ─────────────────────────────────────────
-// LOCAL IN-MEMORY STORE (dev fallback)
-// ─────────────────────────────────────────
-export const localCart = {};
+import { Router } from "express";
+import { requireAuth } from "../middleware/auth.js";
+import { db } from "../db.js";
+import {
+  PutCommand,
+  QueryCommand,
+  DeleteCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 
 const router = Router();
 
+// ─────────────────────────────────────────
 // GET /api/cart
-router.get('/', requireAuth, (req, res) => {
+// ─────────────────────────────────────────
+router.get("/", requireAuth, async (req, res) => {
   const userId = req.user.sub;
-  console.log(`[Cart GET] userId=${userId}, items=${(localCart[userId] || []).length}`);
-  res.json(localCart[userId] || []);
+
+  try {
+    const data = await db.send(
+      new QueryCommand({
+        TableName: "Cart",
+        KeyConditionExpression: "userId = :uid",
+        ExpressionAttributeValues: {
+          ":uid": userId,
+        },
+      })
+    );
+
+    res.json(data.Items || []);
+  } catch (err) {
+    console.error("GET cart error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// PUT /api/cart/:productId  — add / increment
-router.put('/:productId', requireAuth, (req, res) => {
+// ─────────────────────────────────────────
+// PUT /api/cart/:productId (increment/add)
+// ─────────────────────────────────────────
+router.put("/:productId", requireAuth, async (req, res) => {
   const userId = req.user.sub;
   const productId = req.params.productId;
 
-  if (!localCart[userId]) localCart[userId] = [];
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: "Cart",
+        Key: { userId, productId },
+        UpdateExpression:
+          "SET quantity = if_not_exists(quantity, :zero) + :inc",
+        ExpressionAttributeValues: {
+          ":inc": 1,
+          ":zero": 0,
+        },
+      })
+    );
 
-  const existing = localCart[userId].find(i => i.productId === productId);
-  if (existing) {
-    existing.quantity += 1;
-  } else {
-    localCart[userId].push({ productId, quantity: 1 });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PUT cart error:", err);
+    res.status(500).json({ error: err.message });
   }
-
-  console.log(`[Cart PUT] userId=${userId}, productId=${productId}`);
-  res.json({ success: true, cart: localCart[userId] });
 });
 
-// POST /api/cart/add  — alternate add route
-router.post('/add', requireAuth, (req, res) => {
+// ─────────────────────────────────────────
+// POST /api/cart/add
+// ─────────────────────────────────────────
+router.post("/add", requireAuth, async (req, res) => {
   const userId = req.user.sub;
   const { productId, quantity = 1 } = req.body;
 
-  if (!localCart[userId]) localCart[userId] = [];
+  try {
+    await db.send(
+      new UpdateCommand({
+        TableName: "Cart",
+        Key: { userId, productId: String(productId) },
+        UpdateExpression:
+          "SET quantity = if_not_exists(quantity, :zero) + :inc",
+        ExpressionAttributeValues: {
+          ":inc": quantity,
+          ":zero": 0,
+        },
+      })
+    );
 
-  const existing = localCart[userId].find(i => i.productId === String(productId));
-  if (existing) {
-    existing.quantity += quantity;
-  } else {
-    localCart[userId].push({ productId: String(productId), quantity });
+    res.json({ message: "Added to cart" });
+  } catch (err) {
+    console.error("POST cart error:", err);
+    res.status(500).json({ error: err.message });
   }
-
-  console.log(`[Cart POST /add] userId=${userId}, productId=${productId}`);
-  res.json({ message: 'Added to cart', cart: localCart[userId] });
 });
 
+// ─────────────────────────────────────────
 // DELETE /api/cart/:productId
-router.delete('/:productId', requireAuth, (req, res) => {
+// ─────────────────────────────────────────
+router.delete("/:productId", requireAuth, async (req, res) => {
   const userId = req.user.sub;
   const productId = req.params.productId;
 
-  if (localCart[userId]) {
-    localCart[userId] = localCart[userId].filter(i => i.productId !== productId);
-  }
+  try {
+    await db.send(
+      new DeleteCommand({
+        TableName: "Cart",
+        Key: { userId, productId },
+      })
+    );
 
-  res.json({ deleted: true, cart: localCart[userId] || [] });
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error("DELETE cart error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
