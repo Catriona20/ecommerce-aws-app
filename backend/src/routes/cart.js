@@ -2,13 +2,15 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { db } from "../db.js";
 import {
-  PutCommand,
   QueryCommand,
   DeleteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 
 const router = Router();
+
+// ✅ ADD THIS
+export const localCart = [];
 
 // ─────────────────────────────────────────
 // GET /api/cart
@@ -35,7 +37,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// PUT /api/cart/:productId (increment/add)
+// PUT /api/cart/:productId
 // ─────────────────────────────────────────
 router.put("/:productId", requireAuth, async (req, res) => {
   const userId = req.user.sub;
